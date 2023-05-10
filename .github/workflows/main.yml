@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Store Sync
-        uses: jamiemccleave/merge@main
+        uses: jamiemccleave/merge@develop
         with:
           from_branch: "develop"
           to_branch: "devstores/storeone"
