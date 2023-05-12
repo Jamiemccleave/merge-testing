@@ -11,7 +11,7 @@
         "vendor": {
           "type": "text",
           "settings": {
-            "text": "{{ product.vendor }}",
+            "text": "dont push {{ product.vendor }}",
             "text_style": "body"
           }
         },
