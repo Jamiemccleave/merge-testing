@@ -18,17 +18,33 @@ info()  { echo -e "${YELLOW}  →${RESET} $*"; }
 # Sets global: RUN_ID, RUN_CONCLUSION
 trigger_and_wait() {
   info "Pushing to ${FROM_BRANCH} — triggering main.yml"
+
+  # Note the most-recent run ID before pushing so we can detect the new one
+  local PREV_RUN_ID
+  PREV_RUN_ID=$(/opt/homebrew/bin/gh run list \
+    --repo "${REPO}" --workflow main.yml --branch "${FROM_BRANCH}" \
+    --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || echo "")
+
   git push origin "${FROM_BRANCH}"
 
-  sleep 6
+  # Poll until a NEW run (different ID) appears — up to ~60 s
+  info "Waiting for a new Actions run to appear (prev: ${PREV_RUN_ID:-none})"
+  local attempts=0
+  RUN_ID=""
+  while [[ ${attempts} -lt 20 ]]; do
+    sleep 3
+    RUN_ID=$(/opt/homebrew/bin/gh run list \
+      --repo "${REPO}" --workflow main.yml --branch "${FROM_BRANCH}" \
+      --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || echo "")
+    if [[ -n "${RUN_ID}" && "${RUN_ID}" != "${PREV_RUN_ID}" ]]; then
+      break
+    fi
+    attempts=$((attempts + 1))
+  done
 
-  RUN_ID=$(/opt/homebrew/bin/gh run list \
-    --repo "${REPO}" \
-    --workflow main.yml \
-    --branch "${FROM_BRANCH}" \
-    --limit 1 \
-    --json databaseId \
-    --jq '.[0].databaseId')
+  if [[ -z "${RUN_ID}" || "${RUN_ID}" == "${PREV_RUN_ID}" ]]; then
+    fail "No new Actions run appeared after push — check GitHub Actions"
+  fi
 
   info "Watching Actions run ${RUN_ID} — https://github.com/${REPO}/actions/runs/${RUN_ID}"
   /opt/homebrew/bin/gh run watch "${RUN_ID}" --repo "${REPO}" --exit-status
@@ -54,11 +70,27 @@ revert_commits() {
   for _ in $(seq 1 "${n}"); do
     git revert --no-edit HEAD
   done
-  git push origin "${FROM_BRANCH}"
-  sleep 6
-  REVERT_RUN=$(/opt/homebrew/bin/gh run list \
+
+  local PREV_REVERT_RUN
+  PREV_REVERT_RUN=$(/opt/homebrew/bin/gh run list \
     --repo "${REPO}" --workflow main.yml --branch "${FROM_BRANCH}" \
-    --limit 1 --json databaseId --jq '.[0].databaseId')
+    --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || echo "")
+
+  git push origin "${FROM_BRANCH}"
+
+  local attempts=0
+  REVERT_RUN=""
+  while [[ ${attempts} -lt 20 ]]; do
+    sleep 3
+    REVERT_RUN=$(/opt/homebrew/bin/gh run list \
+      --repo "${REPO}" --workflow main.yml --branch "${FROM_BRANCH}" \
+      --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || echo "")
+    if [[ -n "${REVERT_RUN}" && "${REVERT_RUN}" != "${PREV_REVERT_RUN}" ]]; then
+      break
+    fi
+    attempts=$((attempts + 1))
+  done
+
   /opt/homebrew/bin/gh run watch "${REVERT_RUN}" --repo "${REPO}" --exit-status 2>/dev/null || true
 }
 
