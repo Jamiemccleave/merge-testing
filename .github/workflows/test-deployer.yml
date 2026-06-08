@@ -1,0 +1,200 @@
+name: Test — Deployer (no force push)
+
+on:
+  workflow_dispatch:
+
+# Three isolated tests run in parallel.
+# Each test creates its own branches, runs the action, asserts the result, then deletes the branches.
+
+jobs:
+
+  # ── Test 1 ─────────────────────────────────────────────────────────────────
+  # Normal merge: source has a new commit, target is behind.
+  # Pass = action exits 0 AND source is in target's history (plain push worked).
+  test-normal-merge:
+    name: "1 · Normal merge succeeds"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      SRC: test/src-${{ github.run_id }}-${{ github.run_attempt }}
+      TGT: test/tgt-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "Test Bot"
+          git config user.email "actions@github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
+      - name: Create test branches
+        run: |
+          git fetch origin devstores/storeone develop
+
+          # TGT = copy of storeone (the "store" branch receiving the merge)
+          git checkout -b ${{ env.TGT }} origin/devstores/storeone
+          git push origin ${{ env.TGT }}
+
+          # SRC = copy of develop + one new commit (simulates updated theme code)
+          git checkout -b ${{ env.SRC }} origin/develop
+          echo "# run ${{ github.run_id }}" >> test-marker.md
+          git add test-marker.md
+          git commit -m "test: marker commit for run ${{ github.run_id }}"
+          git push origin ${{ env.SRC }}
+
+      - name: Run deployer
+        uses: jamiemccleave/shopify-multi-store-deployer@fix/remove-force-push
+        with:
+          from_branch: ${{ env.SRC }}
+          to_branch: ${{ env.TGT }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert — source is in target history
+        run: |
+          git fetch origin ${{ env.TGT }}
+          if git merge-base --is-ancestor origin/${{ env.SRC }} origin/${{ env.TGT }}; then
+            echo "PASS: source merged into target — plain push worked"
+          else
+            echo "FAIL: source not in target history"
+            exit 1
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: |
+          git push origin --delete ${{ env.SRC }} || true
+          git push origin --delete ${{ env.TGT }} || true
+
+  # ── Test 2 ─────────────────────────────────────────────────────────────────
+  # Already up to date: source and target share the same tip.
+  # Pass = action exits 0 AND no new commit was made on target.
+  test-already-up-to-date:
+    name: "2 · No-op when already up to date"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      SRC: test/noop-src-${{ github.run_id }}-${{ github.run_attempt }}
+      TGT: test/noop-tgt-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "Test Bot"
+          git config user.email "actions@github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
+      - name: Create identical test branches
+        run: |
+          git fetch origin develop
+          git checkout -b ${{ env.SRC }} origin/develop
+          git push origin ${{ env.SRC }}
+          # TGT is the same commit as SRC — nothing to merge
+          git checkout -b ${{ env.TGT }} origin/develop
+          git push origin ${{ env.TGT }}
+
+      - name: Run deployer
+        uses: jamiemccleave/shopify-multi-store-deployer@fix/remove-force-push
+        with:
+          from_branch: ${{ env.SRC }}
+          to_branch: ${{ env.TGT }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert — target branch was not modified
+        run: |
+          git fetch origin ${{ env.SRC }} ${{ env.TGT }}
+          SRC_SHA=$(git rev-parse origin/${{ env.SRC }})
+          TGT_SHA=$(git rev-parse origin/${{ env.TGT }})
+          if [ "$SRC_SHA" = "$TGT_SHA" ]; then
+            echo "PASS: action detected nothing to merge — target unchanged"
+          else
+            echo "FAIL: unexpected commit appeared on target"
+            echo "  src: $SRC_SHA"
+            echo "  tgt: $TGT_SHA"
+            exit 1
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: |
+          git push origin --delete ${{ env.SRC }} || true
+          git push origin --delete ${{ env.TGT }} || true
+
+  # ── Test 3 ─────────────────────────────────────────────────────────────────
+  # Config preservation: source has a different settings_data.json than target.
+  # Pass = after merge, target retains ITS OWN settings_data.json (not source's).
+  test-config-preserved:
+    name: "3 · Store config preserved after merge"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      SRC: test/cfg-src-${{ github.run_id }}-${{ github.run_attempt }}
+      TGT: test/cfg-tgt-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "Test Bot"
+          git config user.email "actions@github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
+      - name: Create test branches with diverging configs
+        run: |
+          git fetch origin develop devstores/storeone
+
+          # SRC has "develop" in settings_data — simulates updated theme
+          git checkout -b ${{ env.SRC }} origin/develop
+          mkdir -p config
+          printf '{"current":"develop-settings"}' > config/settings_data.json
+          git add config/settings_data.json
+          git commit -m "test: develop config version"
+          git push origin ${{ env.SRC }}
+
+          # TGT has "storeone" in settings_data — this should survive the merge
+          git checkout -b ${{ env.TGT }} origin/devstores/storeone
+          printf '{"current":"storeone-settings"}' > config/settings_data.json
+          git add config/settings_data.json
+          git commit -m "test: storeone config version"
+          git push origin ${{ env.TGT }}
+
+      - name: Run deployer
+        uses: jamiemccleave/shopify-multi-store-deployer@fix/remove-force-push
+        with:
+          from_branch: ${{ env.SRC }}
+          to_branch: ${{ env.TGT }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert — store config was not overwritten
+        run: |
+          git fetch origin ${{ env.TGT }}
+          git checkout origin/${{ env.TGT }} -- config/settings_data.json
+          CONTENT=$(cat config/settings_data.json)
+          if echo "$CONTENT" | grep -q "storeone-settings"; then
+            echo "PASS: store settings_data.json retained after merge"
+          else
+            echo "FAIL: settings_data.json was overwritten by source branch"
+            echo "  content: $CONTENT"
+            exit 1
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: |
+          git push origin --delete ${{ env.SRC }} || true
+          git push origin --delete ${{ env.TGT }} || true
