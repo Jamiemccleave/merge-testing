@@ -1,65 +1,56 @@
 #!/usr/bin/env bash
 # Test 3 — Store config preserved
 #
-# Simulates: developer ships updated theme code that includes a different
-# settings_data.json. The store has its own live merchant settings.
-# The deployer must take the theme code but keep the store's config intact.
-#
-# Pass: after merge, target branch retains ITS OWN settings_data.json,
-#       NOT the version from the source branch.
+# Simulates: a developer pushes theme code to develop that includes changes to
+# config/settings_data.json and templates/index.json. The store branch has its
+# own live merchant versions of those files. After deploy, the store's JSON
+# files must survive unchanged.
 
 set -euo pipefail
-source "$(dirname "$0")/helpers.sh"
+cd "$(git rev-parse --show-toplevel)"
+source tests/helpers.sh
 
 echo ""
-echo "Test 3 — Store config preserved (merchant settings survive theme merge)"
-echo "────────────────────────────────────────────────────────────────────────"
+echo "Test 3 — Store config preserved (merchant JSON survives theme deploy)"
+echo "──────────────────────────────────────────────────────────────────────"
 
-make_branches "cfg-src" "cfg-tgt"
-setup_clone
-fetch_deployer
+# ── Step 1: Record current store config before the deploy ────────────────────
+git fetch --quiet origin "${TO_BRANCH}"
+info "Capturing current store JSON before deploy"
+STORE_SETTINGS=$(git show "origin/${TO_BRANCH}:config/settings_data.json" 2>/dev/null || echo "")
+STORE_INDEX=$(git show "origin/${TO_BRANCH}:templates/index.json" 2>/dev/null || echo "")
+info "Store settings_data.json: ${STORE_SETTINGS:0:80}..."
+info "Store templates/index.json: ${STORE_INDEX:0:80}..."
 
-# ── Source: new theme code with develop's config ──────────
-info "Creating source branch (develop — has theme changes + develop settings)"
-git -C "${WORK_DIR}" checkout -b "${TEST_SRC}" "origin/develop"
+# ── Step 2: Set distinct config values on the store branch ───────────────────
+info "Writing store-specific config to ${TO_BRANCH}"
+git checkout "${TO_BRANCH}" 2>/dev/null || git checkout -b "${TO_BRANCH}" "origin/${TO_BRANCH}"
+git pull --quiet origin "${TO_BRANCH}"
+mkdir -p config templates
+printf '{"current":"jamie-test-dev-live","store":"storeone"}' > config/settings_data.json
+printf '{"sections":{"main":{"type":"featured-collection","settings":{"store":"storeone"}}}}' > templates/index.json
+git add config/settings_data.json templates/index.json
+git commit -m "test: set storeone merchant config"
+git push origin "${TO_BRANCH}"
 
-# New theme component (should land on store branch)
-mkdir -p "${WORK_DIR}/assets"
-echo ".promo-banner { display: block; }" > "${WORK_DIR}/assets/promo-banner.css"
+# ── Step 3: Push a theme change to develop (triggers deploy) ─────────────────
+git checkout "${FROM_BRANCH}"
+git pull --quiet origin "${FROM_BRANCH}"
+make_test_commit \
+  "feat: test promo banner component" \
+  "assets/test-promo-banner.css" \
+  ".test-promo-banner { display: block; background: #ff6b00; }"
 
-# Develop has its own settings_data — this must NOT overwrite the store's
-mkdir -p "${WORK_DIR}/config"
-printf '{"current":"develop-default-theme","version":"dev"}' \
-  > "${WORK_DIR}/config/settings_data.json"
+trigger_and_wait
 
-git -C "${WORK_DIR}" add assets/promo-banner.css config/settings_data.json
-git -C "${WORK_DIR}" commit -m "feat: promo banner + dev config"
-git -C "${WORK_DIR}" push origin "${TEST_SRC}"
-
-# ── Target: store branch with live merchant settings ──────
-info "Creating target branch (store — has live merchant settings)"
-git -C "${WORK_DIR}" checkout -b "${TEST_TGT}" "origin/devstores/storeone"
-
-mkdir -p "${WORK_DIR}/config"
-printf '{"current":"jamie-test-dev-live","version":"store"}' \
-  > "${WORK_DIR}/config/settings_data.json"
-
-git -C "${WORK_DIR}" add config/settings_data.json
-git -C "${WORK_DIR}" commit -m "chore: live store merchant settings"
-git -C "${WORK_DIR}" push origin "${TEST_TGT}"
-
-# ── Run deployer ──────────────────────────────────────────
-run_deployer "${TEST_SRC}" "${TEST_TGT}"
-
-# ── Assert ────────────────────────────────────────────────
+# ── Step 4: Assert store config survived ─────────────────────────────────────
 echo ""
+assert_workflow_succeeded
+assert_store_contains "config/settings_data.json" "storeone"
+assert_store_not_contains "config/settings_data.json" "develop"
+assert_store_contains "templates/index.json" "storeone"
+assert_store_contains "assets/test-promo-banner.css" "promo-banner"
 
-# Store config must survive
-assert_file_contains "${TEST_TGT}" "config/settings_data.json" "jamie-test-dev-live"
-
-# Theme code from source must have landed
-assert_file_contains "${TEST_TGT}" "assets/promo-banner.css" "promo-banner"
-
-cleanup "${TEST_SRC}" "${TEST_TGT}"
+revert_commits 1
 echo ""
 echo "Test 3 passed."

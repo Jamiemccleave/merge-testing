@@ -1,52 +1,57 @@
 #!/usr/bin/env bash
-# Test 6 — Brand new store branch
+# Test 6 — Store branch with many accumulated patches
 #
-# Simulates: a new store is being set up for the first time.
-# The to_branch does not exist on the remote yet.
-# The deployer should create it and push successfully.
+# Simulates: a store branch that has several direct hotfix/patch commits on it
+# (the store has diverged from develop over time with merchant customisations).
+# A standard develop → deploy must still fast-forward without needing --force.
 #
-# Pass: action exits 0 AND the new branch exists on remote with source content.
+# The deployer always does `git pull origin ${to_branch}` before merging, so
+# the merge commit's parent is always the current remote HEAD — making the push
+# a plain fast-forward regardless of how many commits are on the store branch.
+#
+# Pass: workflow exits 0 AND all patch files still exist on the store branch
+#       AND the new develop feature also landed.
 
 set -euo pipefail
-source "$(dirname "$0")/helpers.sh"
+cd "$(git rev-parse --show-toplevel)"
+source tests/helpers.sh
 
 echo ""
-echo "Test 6 — Brand new store branch (first-ever deploy to a new store)"
-echo "────────────────────────────────────────────────────────────────────"
+echo "Test 6 — Many patches on store branch (plain push stays fast-forward)"
+echo "────────────────────────────────────────────────────────────────────────"
 
-make_branches "new-src" "new-store"
-setup_clone
-fetch_deployer
+# ── Step 1: Push 3 merchant patches directly to devstores/storeone ───────────
+info "Pushing 3 direct merchant patches to ${TO_BRANCH}"
+git fetch --quiet origin "${TO_BRANCH}"
+git checkout "${TO_BRANCH}" 2>/dev/null || git checkout -b "${TO_BRANCH}" "origin/${TO_BRANCH}"
+git pull --quiet origin "${TO_BRANCH}"
 
-# ── Source: develop with some theme code ─────────────────
-info "Creating source branch (develop — existing theme)"
-git -C "${WORK_DIR}" checkout -b "${TEST_SRC}" "origin/develop"
-echo ".new-store-badge { display: block; }" > "${WORK_DIR}/assets/new-store.css"
-git -C "${WORK_DIR}" add assets/new-store.css
-git -C "${WORK_DIR}" commit -m "feat: new store launch styles"
-git -C "${WORK_DIR}" push origin "${TEST_SRC}"
+for i in 1 2 3; do
+  printf ".merchant-patch-%s { display: block; }" "${i}" > "assets/merchant-patch-${i}.css"
+  git add "assets/merchant-patch-${i}.css"
+  git commit -m "merchant patch: style update ${i}"
+done
+git push origin "${TO_BRANCH}"
+info "3 patches pushed to ${TO_BRANCH}"
 
-# ── Target: does NOT exist yet ────────────────────────────
-info "Target branch '${TEST_TGT}' intentionally not created — simulates new store"
+# ── Step 2: Push a new develop feature (triggers main.yml) ───────────────────
+git checkout "${FROM_BRANCH}"
+git pull --quiet origin "${FROM_BRANCH}"
+make_test_commit \
+  "feat: test collection layout (test 6)" \
+  "sections/test-collection-06.liquid" \
+  "<section class=\"collection\"><!-- test 6 collection layout --></section>"
 
-# ── Run deployer ──────────────────────────────────────────
-# The deployer's `git checkout -b` path handles branch creation
-run_deployer "${TEST_SRC}" "${TEST_TGT}"
+trigger_and_wait
 
-# ── Assert ────────────────────────────────────────────────
+# ── Step 3: Assert all patches + develop feature present ─────────────────────
 echo ""
+assert_workflow_succeeded
+assert_store_contains "assets/merchant-patch-1.css" "merchant-patch-1"
+assert_store_contains "assets/merchant-patch-2.css" "merchant-patch-2"
+assert_store_contains "assets/merchant-patch-3.css" "merchant-patch-3"
+assert_store_contains "sections/test-collection-06.liquid" "collection"
 
-# Branch should now exist on remote
-git -C "${WORK_DIR}" fetch --quiet origin 2>/dev/null || true
-if git -C "${WORK_DIR}" ls-remote --exit-code origin "${TEST_TGT}" > /dev/null 2>&1; then
-  pass "New store branch '${TEST_TGT}' was created on remote"
-else
-  fail "Branch '${TEST_TGT}' was not pushed to remote"
-fi
-
-# Source content should be on the new branch
-assert_file_contains "${TEST_TGT}" "assets/new-store.css" "new-store-badge"
-
-cleanup "${TEST_SRC}" "${TEST_TGT}"
+revert_commits 1
 echo ""
 echo "Test 6 passed."

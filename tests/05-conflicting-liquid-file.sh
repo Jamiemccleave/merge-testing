@@ -1,62 +1,49 @@
 #!/usr/bin/env bash
 # Test 5 — Conflicting liquid file
 #
-# Simulates: both develop and the store branch have edited the same
-# sections/header.liquid file. The deployer uses --strategy-option theirs
-# so develop's version wins the conflict. Plain push should still work.
+# Simulates: both develop and devstores/storeone have edited the same liquid
+# file (sections/header.liquid). The deployer uses --strategy-option theirs so
+# develop's version always wins. The push should be plain fast-forward — no
+# force needed.
 #
-# Pass: action exits 0 AND the header.liquid on the store branch contains
-#       the develop version (theirs strategy applied correctly).
+# Pass: workflow exits 0 AND sections/header.liquid on the store branch shows
+#       develop's class name (site-header--develop), not the store's override.
 
 set -euo pipefail
-source "$(dirname "$0")/helpers.sh"
+cd "$(git rev-parse --show-toplevel)"
+source tests/helpers.sh
 
 echo ""
-echo "Test 5 — Conflicting liquid file (same file edited on both branches)"
-echo "──────────────────────────────────────────────────────────────────────"
+echo "Test 5 — Conflicting liquid file (develop version wins, plain push succeeds)"
+echo "─────────────────────────────────────────────────────────────────────────────"
 
-make_branches "conflict-src" "conflict-tgt"
-setup_clone
-fetch_deployer
+# ── Step 1: Commit the store's version of header.liquid ──────────────────────
+info "Writing store-specific header.liquid to ${TO_BRANCH}"
+git fetch --quiet origin "${TO_BRANCH}"
+git checkout "${TO_BRANCH}" 2>/dev/null || git checkout -b "${TO_BRANCH}" "origin/${TO_BRANCH}"
+git pull --quiet origin "${TO_BRANCH}"
+mkdir -p sections
+printf '<header class="site-header--storeone">Store One</header>' > sections/header.liquid
+git add sections/header.liquid
+git commit -m "test: storeone custom header branding"
+git push origin "${TO_BRANCH}"
 
-# ── Source: develop edits header.liquid ──────────────────
-info "Creating source branch (develop version of header.liquid)"
-git -C "${WORK_DIR}" checkout -b "${TEST_SRC}" "origin/develop"
-mkdir -p "${WORK_DIR}/sections"
-cat > "${WORK_DIR}/sections/header.liquid" <<'LIQUID'
-<header class="site-header site-header--develop">
-  <a href="/" class="site-header__logo">{{ shop.name }}</a>
-</header>
-LIQUID
-git -C "${WORK_DIR}" add sections/header.liquid
-git -C "${WORK_DIR}" commit -m "feat: updated header layout from develop"
-git -C "${WORK_DIR}" push origin "${TEST_SRC}"
+# ── Step 2: Push develop's conflicting version (triggers main.yml) ────────────
+git checkout "${FROM_BRANCH}"
+git pull --quiet origin "${FROM_BRANCH}"
+make_test_commit \
+  "feat: global header update (test 5)" \
+  "sections/header.liquid" \
+  '<header class="site-header--develop">{{ shop.name }}</header>'
 
-# ── Target: store branch has its own version of header.liquid ────
-info "Creating target branch (store version of header.liquid — will be overwritten by theirs)"
-git -C "${WORK_DIR}" checkout -b "${TEST_TGT}" "origin/devstores/storeone"
-mkdir -p "${WORK_DIR}/sections"
-cat > "${WORK_DIR}/sections/header.liquid" <<'LIQUID'
-<header class="site-header site-header--storeone">
-  <a href="/" class="site-header__logo">{{ shop.name }} Store One</a>
-</header>
-LIQUID
-git -C "${WORK_DIR}" add sections/header.liquid
-git -C "${WORK_DIR}" commit -m "customisation: store one header branding"
-git -C "${WORK_DIR}" push origin "${TEST_TGT}"
+trigger_and_wait
 
-# ── Run deployer ──────────────────────────────────────────
-run_deployer "${TEST_SRC}" "${TEST_TGT}"
-
-# ── Assert ────────────────────────────────────────────────
+# ── Step 3: Assert develop's version won the conflict ────────────────────────
 echo ""
+assert_workflow_succeeded
+assert_store_contains "sections/header.liquid" "site-header--develop"
+assert_store_not_contains "sections/header.liquid" "site-header--storeone"
 
-# develop's version should win (--strategy-option theirs = from_branch wins)
-assert_file_contains "${TEST_TGT}" "sections/header.liquid" "site-header--develop"
-
-# plain push succeeded — source is in target history
-assert_ancestor "${TEST_SRC}" "${TEST_TGT}"
-
-cleanup "${TEST_SRC}" "${TEST_TGT}"
+revert_commits 1
 echo ""
 echo "Test 5 passed."
