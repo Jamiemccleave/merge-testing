@@ -15,6 +15,9 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 source tests/helpers.sh
+trap 'git checkout "${FROM_BRANCH}" 2>/dev/null || true' EXIT
+
+TS=$(date +%s)
 
 echo ""
 echo "Test 4 — Hotfix on store branch (direct commit preserved through deploy)"
@@ -25,9 +28,9 @@ info "Committing hotfix directly to ${TO_BRANCH}"
 git fetch --quiet origin "${TO_BRANCH}"
 git checkout "${TO_BRANCH}" 2>/dev/null || git checkout -b "${TO_BRANCH}" "origin/${TO_BRANCH}"
 git pull --quiet origin "${TO_BRANCH}"
-printf '.cart-price-fix { font-size: 1rem; }' > assets/hotfix-cart-price.css
+printf '.cart-price-fix { /* hotfix ts:%s */ font-size: 1rem; }' "${TS}" > assets/hotfix-cart-price.css
 git add assets/hotfix-cart-price.css
-git commit -m "hotfix: cart price display bug fix"
+git commit -m "hotfix: cart price display bug fix (${TS})"
 git push origin "${TO_BRANCH}"
 info "Hotfix pushed to ${TO_BRANCH}"
 
@@ -35,9 +38,9 @@ info "Hotfix pushed to ${TO_BRANCH}"
 git checkout "${FROM_BRANCH}"
 git pull --quiet origin "${FROM_BRANCH}"
 make_test_commit \
-  "feat: test promo section component" \
+  "feat: test promo section component (${TS})" \
   "sections/test-promo-04.liquid" \
-  "<section class=\"promo\"><!-- test 4 promo section --></section>"
+  "<section class=\"promo\"><!-- test 4 promo ts:${TS} --></section>"
 
 trigger_and_wait
 

@@ -7,18 +7,22 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 source tests/helpers.sh
+trap 'git checkout "${FROM_BRANCH}" 2>/dev/null || true' EXIT
+
+TS=$(date +%s)
 
 echo ""
 echo "Test 1 — Normal merge (developer pushes new component to develop)"
 echo "──────────────────────────────────────────────────────────────────"
 
 git checkout "${FROM_BRANCH}"
+git pull --quiet origin "${FROM_BRANCH}"
 
 info "Adding new CSS component to develop"
 make_test_commit \
-  "feat: test sale badge styles" \
+  "feat: test sale badge styles (${TS})" \
   "assets/test-sale-badge.css" \
-  ".test-sale-badge { background: red; color: white; }"
+  ".test-sale-badge { /* ts:${TS} */ background: red; color: white; }"
 
 trigger_and_wait
 
