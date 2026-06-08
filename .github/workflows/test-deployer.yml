@@ -1,6 +1,9 @@
 name: Test — Deployer (no force push)
 
 on:
+  push:
+    branches:
+      - develop
   workflow_dispatch:
 
 # Three isolated tests run in parallel.
