@@ -308,8 +308,11 @@ jobs:
           git push origin --delete ${{ env.TGT }} || true
 
   # ── Test 6 ─────────────────────────────────────────────────────────────────
+  # First deploy to a new store: target branch exists but has never received
+  # a deploy. Source has new theme code the target doesn't have yet.
+  # Pass = deployer merges and pushes cleanly without force.
   test-brand-new-store:
-    name: "6 · Brand new store branch created"
+    name: "6 · First deploy to new store branch"
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -326,30 +329,34 @@ jobs:
           git config user.name "Test Bot"
           git config user.email "actions@github.com"
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-      - name: Create source only (target absent)
+      - name: Create branches — target exists but is behind source
         run: |
-          git fetch origin develop
+          git fetch origin develop devstores/storeone
+          # TGT = new store branch, pre-created from storeone base (no deploys yet)
+          git checkout -b ${{ env.TGT }} origin/devstores/storeone
+          git push origin ${{ env.TGT }}
+          # SRC = develop + a new launch commit the store hasn't received
           git checkout -b ${{ env.SRC }} origin/develop
           echo ".launch { display: block; }" > assets/launch.css
           git add assets/launch.css
           git commit -m "feat: new store launch styles"
           git push origin ${{ env.SRC }}
-      - name: Run deployer against non-existent target
+      - name: Run deployer — first ever deploy to this store
         uses: jamiemccleave/shopify-multi-store-deployer@v2.0
         with:
           from_branch: ${{ env.SRC }}
           to_branch: ${{ env.TGT }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Assert — branch created with source content
+      - name: Assert — source merged into store branch
         run: |
-          git fetch origin
-          git ls-remote --exit-code origin ${{ env.TGT }} \
-            && echo "PASS: new store branch created on remote" \
-            || { echo "FAIL: branch not pushed"; exit 1; }
+          git fetch origin ${{ env.TGT }}
+          git merge-base --is-ancestor origin/${{ env.SRC }} origin/${{ env.TGT }} \
+            && echo "PASS: first deploy landed on new store branch" \
+            || { echo "FAIL: source not in store branch history"; exit 1; }
           git show origin/${{ env.TGT }}:assets/launch.css | grep -q "launch" \
-            && echo "PASS: source content present" \
-            || { echo "FAIL: source content missing"; exit 1; }
+            && echo "PASS: launch styles present on store branch" \
+            || { echo "FAIL: launch styles missing"; exit 1; }
       - name: Cleanup
         if: always()
         run: |
