@@ -15,6 +15,9 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 source tests/helpers.sh
+trap 'git checkout "${FROM_BRANCH}" 2>/dev/null || true' EXIT
+
+TS=$(date +%s)
 
 echo ""
 echo "Test 6 — Many patches on store branch (plain push stays fast-forward)"
@@ -27,9 +30,9 @@ git checkout "${TO_BRANCH}" 2>/dev/null || git checkout -b "${TO_BRANCH}" "origi
 git pull --quiet origin "${TO_BRANCH}"
 
 for i in 1 2 3; do
-  printf ".merchant-patch-%s { display: block; }" "${i}" > "assets/merchant-patch-${i}.css"
+  printf ".merchant-patch-%s { /* ts:%s */ display: block; }" "${i}" "${TS}" > "assets/merchant-patch-${i}.css"
   git add "assets/merchant-patch-${i}.css"
-  git commit -m "merchant patch: style update ${i}"
+  git commit -m "merchant patch: style update ${i} (${TS})"
 done
 git push origin "${TO_BRANCH}"
 info "3 patches pushed to ${TO_BRANCH}"
@@ -38,9 +41,9 @@ info "3 patches pushed to ${TO_BRANCH}"
 git checkout "${FROM_BRANCH}"
 git pull --quiet origin "${FROM_BRANCH}"
 make_test_commit \
-  "feat: test collection layout (test 6)" \
+  "feat: test collection layout (${TS})" \
   "sections/test-collection-06.liquid" \
-  "<section class=\"collection\"><!-- test 6 collection layout --></section>"
+  "<section class=\"collection\"><!-- test 6 ts:${TS} --></section>"
 
 trigger_and_wait
 

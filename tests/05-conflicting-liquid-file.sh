@@ -12,6 +12,9 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 source tests/helpers.sh
+trap 'git checkout "${FROM_BRANCH}" 2>/dev/null || true' EXIT
+
+TS=$(date +%s)
 
 echo ""
 echo "Test 5 — Conflicting liquid file (develop version wins, plain push succeeds)"
@@ -23,18 +26,18 @@ git fetch --quiet origin "${TO_BRANCH}"
 git checkout "${TO_BRANCH}" 2>/dev/null || git checkout -b "${TO_BRANCH}" "origin/${TO_BRANCH}"
 git pull --quiet origin "${TO_BRANCH}"
 mkdir -p sections
-printf '<header class="site-header--storeone">Store One</header>' > sections/header.liquid
+printf '<header class="site-header--storeone">Store One <!-- ts:%s --></header>' "${TS}" > sections/header.liquid
 git add sections/header.liquid
-git commit -m "test: storeone custom header branding"
+git commit -m "test: storeone custom header branding (${TS})"
 git push origin "${TO_BRANCH}"
 
 # ── Step 2: Push develop's conflicting version (triggers main.yml) ────────────
 git checkout "${FROM_BRANCH}"
 git pull --quiet origin "${FROM_BRANCH}"
 make_test_commit \
-  "feat: global header update (test 5)" \
+  "feat: global header update (${TS})" \
   "sections/header.liquid" \
-  '<header class="site-header--develop">{{ shop.name }}</header>'
+  "<header class=\"site-header--develop\">{{ shop.name }} <!-- ts:${TS} --></header>"
 
 trigger_and_wait
 
