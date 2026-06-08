@@ -1,65 +1,52 @@
 #!/usr/bin/env bash
 # Test 4 — Hotfix on store branch
 #
-# Simulates: developer pushes a hotfix commit directly to the store branch
-# (bypassing develop) to fix something urgently. Then the deployer runs.
+# Simulates: a developer pushes a hotfix commit directly to devstores/storeone
+# (bypassing develop) to fix something urgently. Then a normal develop → deploy
+# runs on top.
 #
-# The deployer does `git pull` before merging so it picks up the hotfix.
-# The merge commit sits on top of it — plain push should be fast-forward.
+# The deployer does `git pull` before merging so it picks up the remote store
+# HEAD (including the hotfix). The resulting merge commit is a fast-forward
+# push — no force needed.
 #
-# Pass: action exits 0 AND both the hotfix AND the develop change are in
-#       the target branch history after the run.
+# Pass: workflow exits 0, hotfix file still exists on store, AND the develop
+#       change also lands on the store branch.
 
 set -euo pipefail
-source "$(dirname "$0")/helpers.sh"
+cd "$(git rev-parse --show-toplevel)"
+source tests/helpers.sh
 
 echo ""
-echo "Test 4 — Hotfix on store branch (deployer runs after direct commit to store)"
-echo "─────────────────────────────────────────────────────────────────────────────"
+echo "Test 4 — Hotfix on store branch (direct commit preserved through deploy)"
+echo "─────────────────────────────────────────────────────────────────────────"
 
-make_branches "hotfix-src" "hotfix-tgt"
-setup_clone
-fetch_deployer
+# ── Step 1: Push a hotfix directly to devstores/storeone ─────────────────────
+info "Committing hotfix directly to ${TO_BRANCH}"
+git fetch --quiet origin "${TO_BRANCH}"
+git checkout "${TO_BRANCH}" 2>/dev/null || git checkout -b "${TO_BRANCH}" "origin/${TO_BRANCH}"
+git pull --quiet origin "${TO_BRANCH}"
+printf '.cart-price-fix { font-size: 1rem; }' > assets/hotfix-cart-price.css
+git add assets/hotfix-cart-price.css
+git commit -m "hotfix: cart price display bug fix"
+git push origin "${TO_BRANCH}"
+info "Hotfix pushed to ${TO_BRANCH}"
 
-# ── Source branch: new theme code ────────────────────────
-info "Creating source branch (new theme feature on develop)"
-git -C "${WORK_DIR}" checkout -b "${TEST_SRC}" "origin/develop"
-echo ".sale-badge { background: red; }" > "${WORK_DIR}/assets/sale-badge.css"
-git -C "${WORK_DIR}" add assets/sale-badge.css
-git -C "${WORK_DIR}" commit -m "feat: sale badge styles"
-git -C "${WORK_DIR}" push origin "${TEST_SRC}"
+# ── Step 2: Push new theme code to develop (triggers main.yml) ───────────────
+git checkout "${FROM_BRANCH}"
+git pull --quiet origin "${FROM_BRANCH}"
+make_test_commit \
+  "feat: test promo section component" \
+  "sections/test-promo-04.liquid" \
+  "<section class=\"promo\"><!-- test 4 promo section --></section>"
 
-# ── Target branch: store branch with a direct hotfix ─────
-info "Creating target branch then adding a direct hotfix commit"
-git -C "${WORK_DIR}" checkout -b "${TEST_TGT}" "origin/devstores/storeone"
-git -C "${WORK_DIR}" push origin "${TEST_TGT}"
+trigger_and_wait
 
-# Simulate a developer pushing a hotfix directly to the store branch
-echo "/* emergency price fix */" >> "${WORK_DIR}/assets/base.css"
-git -C "${WORK_DIR}" add assets/base.css
-git -C "${WORK_DIR}" commit -m "hotfix: emergency price display fix"
-git -C "${WORK_DIR}" push origin "${TEST_TGT}"
-
-HOTFIX_SHA=$(git -C "${WORK_DIR}" rev-parse HEAD)
-info "Hotfix commit on store branch: ${HOTFIX_SHA}"
-
-# ── Run deployer ──────────────────────────────────────────
-run_deployer "${TEST_SRC}" "${TEST_TGT}"
-
-# ── Assert ────────────────────────────────────────────────
+# ── Step 3: Assert both the hotfix AND the develop change are on store ────────
 echo ""
+assert_workflow_succeeded
+assert_store_contains "assets/hotfix-cart-price.css" "cart-price-fix"
+assert_store_contains "sections/test-promo-04.liquid" "promo"
 
-# Hotfix must still be in store branch history (not overwritten)
-git -C "${WORK_DIR}" fetch --quiet origin "${TEST_TGT}"
-if git -C "${WORK_DIR}" merge-base --is-ancestor "${HOTFIX_SHA}" "origin/${TEST_TGT}"; then
-  pass "Hotfix commit preserved in store branch history"
-else
-  fail "Hotfix commit was lost — force push would have clobbered it"
-fi
-
-# New theme code from source must also be present
-assert_file_contains "${TEST_TGT}" "assets/sale-badge.css" "sale-badge"
-
-cleanup "${TEST_SRC}" "${TEST_TGT}"
+revert_commits 1
 echo ""
 echo "Test 4 passed."

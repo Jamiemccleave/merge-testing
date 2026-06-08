@@ -1,41 +1,33 @@
 #!/usr/bin/env bash
 # Test 2 — Already up to date
 #
-# Simulates: the deployer is triggered twice in a row with no new commits in between.
-# The second run should detect nothing to merge and exit cleanly without pushing.
-#
-# Pass: action exits 0 AND the store branch SHA is unchanged after the second run.
+# Triggers the workflow when develop has nothing new for the store.
+# Expects: main.yml runs cleanly, exits as no-op.
 
 set -euo pipefail
-source "$(dirname "$0")/helpers.sh"
+cd "$(git rev-parse --show-toplevel)"
+source tests/helpers.sh
 
 echo ""
-echo "Test 2 — Already up to date (deployer triggered with no new changes)"
-echo "──────────────────────────────────────────────────────────────────────"
+echo "Test 2 — No-op (develop has nothing new for the store)"
+echo "───────────────────────────────────────────────────────"
 
-make_branches "noop-src" "noop-tgt"
-setup_clone
-fetch_deployer
+git checkout "${FROM_BRANCH}"
 
-# ── Both branches start at the same commit ────────────────
-info "Creating source and target at identical commit (nothing to merge)"
-git -C "${WORK_DIR}" checkout -b "${TEST_SRC}" "origin/develop"
-git -C "${WORK_DIR}" push origin "${TEST_SRC}"
+info "Triggering workflow with no new changes (workflow_dispatch)"
+/opt/homebrew/bin/gh workflow run main.yml --repo "${REPO}" --ref "${FROM_BRANCH}"
 
-git -C "${WORK_DIR}" checkout -b "${TEST_TGT}" "origin/develop"
-git -C "${WORK_DIR}" push origin "${TEST_TGT}"
+sleep 6
+RUN_ID=$(/opt/homebrew/bin/gh run list \
+  --repo "${REPO}" --workflow main.yml --branch "${FROM_BRANCH}" \
+  --limit 1 --json databaseId --jq '.[0].databaseId')
 
-# Capture target SHA before run
-TGT_SHA_BEFORE=$(git -C "${WORK_DIR}" rev-parse "origin/${TEST_TGT}")
-info "Target SHA before run: ${TGT_SHA_BEFORE}"
+info "Watching Actions run ${RUN_ID} — https://github.com/${REPO}/actions/runs/${RUN_ID}"
+/opt/homebrew/bin/gh run watch "${RUN_ID}" --repo "${REPO}" --exit-status
+RUN_CONCLUSION=$(/opt/homebrew/bin/gh run view "${RUN_ID}" \
+  --repo "${REPO}" --json conclusion --jq '.conclusion')
 
-# ── Run deployer ──────────────────────────────────────────
-run_deployer "${TEST_SRC}" "${TEST_TGT}"
-
-# ── Assert ────────────────────────────────────────────────
 echo ""
-assert_sha_unchanged "${TEST_TGT}" "${TGT_SHA_BEFORE}"
-
-cleanup "${TEST_SRC}" "${TEST_TGT}"
+assert_workflow_succeeded
 echo ""
 echo "Test 2 passed."

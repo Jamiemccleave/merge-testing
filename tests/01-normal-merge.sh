@@ -1,49 +1,31 @@
 #!/usr/bin/env bash
 # Test 1 — Normal merge
 #
-# Simulates: a developer ships a new header component to develop.
-# The deployer should merge it into the store branch using a plain push (no force).
-#
-# Pass: action exits 0 AND the new commit appears in the store branch history.
+# Simulates a developer pushing a new CSS component to develop.
+# Expects: main.yml runs, change lands on devstores/storeone.
 
 set -euo pipefail
-source "$(dirname "$0")/helpers.sh"
+cd "$(git rev-parse --show-toplevel)"
+source tests/helpers.sh
 
 echo ""
-echo "Test 1 — Normal merge (developer ships code to develop)"
-echo "────────────────────────────────────────────────────────"
+echo "Test 1 — Normal merge (developer pushes new component to develop)"
+echo "──────────────────────────────────────────────────────────────────"
 
-make_branches "src" "tgt"
-setup_clone
-fetch_deployer
+git checkout "${FROM_BRANCH}"
 
-# ── Simulate human change on develop ─────────────────────
-info "Creating source branch (developer pushed a new component)"
-git -C "${WORK_DIR}" checkout -b "${TEST_SRC}" "origin/develop"
-mkdir -p "${WORK_DIR}/assets"
-cat > "${WORK_DIR}/assets/header-update.css" <<'CSS'
-/* Header redesign — sprint 42 */
-.site-header { background: #1a1a2e; }
-CSS
-git -C "${WORK_DIR}" add assets/header-update.css
-git -C "${WORK_DIR}" commit -m "feat: new header styles (sprint 42)"
-git -C "${WORK_DIR}" push origin "${TEST_SRC}"
+info "Adding new CSS component to develop"
+make_test_commit \
+  "feat: test sale badge styles" \
+  "assets/test-sale-badge.css" \
+  ".test-sale-badge { background: red; color: white; }"
 
-# ── Target branch starts behind ───────────────────────────
-info "Creating target branch (store branch — behind develop)"
-git -C "${WORK_DIR}" checkout -b "${TEST_TGT}" "origin/devstores/storeone"
-git -C "${WORK_DIR}" push origin "${TEST_TGT}"
+trigger_and_wait
 
-# ── Run deployer ──────────────────────────────────────────
-run_deployer "${TEST_SRC}" "${TEST_TGT}"
-
-# ── Assert ────────────────────────────────────────────────
 echo ""
-assert_ancestor "${TEST_SRC}" "${TEST_TGT}"
+assert_workflow_succeeded
+assert_store_contains "assets/test-sale-badge.css" "test-sale-badge"
 
-# Confirm the CSS file made it across
-assert_file_contains "${TEST_TGT}" "assets/header-update.css" "sprint 42"
-
-cleanup "${TEST_SRC}" "${TEST_TGT}"
+revert_commits 1
 echo ""
 echo "Test 1 passed."

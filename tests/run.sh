@@ -24,7 +24,7 @@ else
   run_test "${TESTS_DIR}/04-hotfix-on-store-branch.sh"
   run_test "${TESTS_DIR}/05-conflicting-liquid-file.sh"
   run_test "${TESTS_DIR}/06-brand-new-store-branch.sh"
-  run_test "${TESTS_DIR}/07-race-condition.sh"
+  run_test "${TESTS_DIR}/07-manual-trigger.sh"
   echo ""
   echo "All tests passed."
 fi
