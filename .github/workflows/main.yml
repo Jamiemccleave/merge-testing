@@ -16,10 +16,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@v2
 
       - name: Store Sync
-        uses: jamiemccleave/shopify-multi-store-deployer@fix/remove-force-push
+        uses: jamiemccleave/shopify-multi-store-deployer@v2.0
         with:
           from_branch: "develop"
           to_branch: "devstores/storeone"

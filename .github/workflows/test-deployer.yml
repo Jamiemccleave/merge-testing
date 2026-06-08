@@ -23,7 +23,7 @@ jobs:
       SRC: test/src-${{ github.run_id }}-${{ github.run_attempt }}
       TGT: test/tgt-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@v2
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -85,7 +85,7 @@ jobs:
       SRC: test/noop-src-${{ github.run_id }}-${{ github.run_attempt }}
       TGT: test/noop-tgt-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@v2
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -145,7 +145,7 @@ jobs:
       SRC: test/cfg-src-${{ github.run_id }}-${{ github.run_attempt }}
       TGT: test/cfg-tgt-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@v2
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
